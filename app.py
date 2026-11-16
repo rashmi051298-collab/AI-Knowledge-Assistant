@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,72 @@ from dotenv import load_dotenv
 from code_assistant import CodebaseIndex, SearchResult
 
 
+_FLASH_MODEL_PATTERN = re.compile(
+    r"^gemini-(?P<version>\d+(?:\.\d+)?)-flash(?P<variant>(?:-[a-zA-Z0-9._-]+)?)$"
+)
+
+
+def _available_flash_fallbacks(models: Iterable[Any]) -> list[str]:
+    ranked_models: list[tuple[tuple[int, int], bool, str]] = []
+    for model in models:
+        name = getattr(model, "name", "")
+        if not isinstance(name, str):
+            continue
+        name = name.removeprefix("models/")
+        if "generateContent" not in (getattr(model, "supported_actions", None) or []):
+            continue
+
+        match = _FLASH_MODEL_PATTERN.fullmatch(name)
+        if not match:
+            continue
+        variant = match.group("variant").lower()
+        if "lite" in variant or "8b" in variant:
+            continue
+
+        version_parts = tuple(int(part) for part in match.group("version").split("."))
+        version = (version_parts + (0, 0))[:2]
+        if version < (2, 5):
+            continue
+        ranked_models.append((version, not variant, name))
+
+    ranked_models.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return list(dict.fromkeys(name for _, _, name in ranked_models))
+
+
+def _invoke_with_model_fallback(prompt: Any, api_key: str, preferred_model: str) -> Any:
+    from google import genai
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_google_genai.chat_models import GoogleModelNotFoundError
+
+    def invoke(model_name: str) -> Any:
+        model = ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0,
+        )
+        return model.invoke(prompt)
+
+    try:
+        return invoke(preferred_model)
+    except GoogleModelNotFoundError as original_error:
+        available_models = genai.Client(api_key=api_key).models.list()
+        candidates = [
+            model_name
+            for model_name in _available_flash_fallbacks(available_models)
+            if model_name != preferred_model.removeprefix("models/")
+        ]
+        for model_name in candidates:
+            try:
+                return invoke(model_name)
+            except GoogleModelNotFoundError:
+                continue
+
+        raise ValueError(
+            "The configured Gemini model is unavailable, and no accessible Gemini "
+            "Flash model version 2.5 or newer was found."
+        ) from original_error
+
+
 def answer_with_gemini(
     question: str,
     results: list[SearchResult],
@@ -19,7 +87,6 @@ def answer_with_gemini(
     model_name: str,
 ) -> Any:
     from langchain_core.prompts import ChatPromptTemplate
-    from langchain_google_genai import ChatGoogleGenerativeAI
 
     context = "\n\n".join(
         f"--- {result.chunk.source}:{result.chunk.start_line}-"
@@ -42,12 +109,11 @@ def answer_with_gemini(
             ),
         ]
     )
-    model = ChatGoogleGenerativeAI(
-        model=model_name,
-        google_api_key=api_key,
-        temperature=0,
+    return _invoke_with_model_fallback(
+        prompt.invoke({"question": question, "context": context}),
+        api_key,
+        model_name,
     )
-    return model.invoke(prompt.invoke({"question": question, "context": context}))
 
 
 def main() -> None:

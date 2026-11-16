@@ -8,6 +8,7 @@ Ask questions about a PHP/Laravel project (or another supported source tree) usi
 - Splits files into overlapping chunks and embeds them with Sentence Transformers.
 - Uses a FAISS inner-product index over normalized embeddings for semantic search.
 - Sends the question and retrieved excerpts to Gemini through LangChain, with source-file citations in the answer.
+- If the configured Gemini Flash model is unavailable, discovers accessible Flash models that support content generation and tries versions 2.5 or newer, newest first.
 - Caches the index locally in `.code-assistant-index/` and rebuilds it when indexed files or the embedding model change.
 
 The codebase is indexed locally. Only the question and retrieved excerpts are sent to Google's Gemini API when you ask a question. Review your organization's data policies before using a hosted model with proprietary code.

@@ -12,6 +12,7 @@ class ShouldIndexFileTests(unittest.TestCase):
     def test_excludes_generated_and_sensitive_files(self) -> None:
         self.assertFalse(should_index_file(Path("vendor/laravel/framework/src/Router.php")))
         self.assertFalse(should_index_file(Path("node_modules/pkg/index.js")))
+        self.assertFalse(should_index_file(Path(".venv314/Lib/site-packages/pkg/module.py")))
         self.assertFalse(should_index_file(Path(".env")))
         self.assertFalse(should_index_file(Path(".env.production")))
         self.assertFalse(should_index_file(Path("composer.lock")))

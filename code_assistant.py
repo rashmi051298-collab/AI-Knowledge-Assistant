@@ -48,6 +48,7 @@ EXCLUDED_DIRECTORIES = {
     ".hg",
     ".idea",
     ".venv",
+    ".venv314",
     ".vscode",
     "__pycache__",
     "build",
